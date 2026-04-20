@@ -1,11 +1,7 @@
 /**
- * Shared Database Module
- * SQLite database layer for CollabNotes
- * Note: This is temporary scaffolding. Leul will enhance this with:
- * - Connection pooling
- * - Migration system
- * - Comprehensive query builders
- * - Backup/restore utilities
+ * Shared Database Module — SQLite layer for CollabNotes (X-MAN encapsulated facade).
+ * Legacy API: getDb(), all(), get(), run() — used by shared-notes and sharing.
+ * X-MAN API: init, query, insert, update, delete, close — all return { success, data } | { success: false, error }.
  */
 
 const sqlite3 = require('sqlite3').verbose();
@@ -15,140 +11,251 @@ function getDbPath() {
   return process.env.CNB_DB_PATH || path.join(__dirname, '..', '..', 'collabnotes.db');
 }
 
+const ALLOWED_TABLES = new Set([
+  'users',
+  'notes',
+  'shares',
+  'sessions',
+  'note_versions',
+  'note_shares',
+]);
+
+function validateTableName(table) {
+  if (typeof table !== 'string' || !ALLOWED_TABLES.has(table)) {
+    return { ok: false, error: 'Invalid or unsupported table name' };
+  }
+  return { ok: true };
+}
+
+// Singleton — one connection per process (SQLite file semantics).
+let instance = null;
+
 class Database {
   constructor() {
     this.db = null;
   }
 
   /**
-   * Initialize database connection
+   * X-MAN: open DB, create tables. Returns { success, data: this } or { success: false, error }.
    */
   async init() {
-    return new Promise((resolve, reject) => {
+    try {
+      if (this.db) {
+        return { success: true, data: this };
+      }
       const DB_PATH = getDbPath();
-      this.db = new sqlite3.Database(DB_PATH, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          console.log('[DB] Connected to SQLite:', DB_PATH);
-          this.createTables()
-            .then(() => resolve(this))
-            .catch(reject);
-        }
+      await new Promise((resolve, reject) => {
+        this.db = new sqlite3.Database(DB_PATH, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
       });
-    });
+      console.log('[DB] Connected to SQLite:', DB_PATH);
+      await this._createTablesInternal();
+      return { success: true, data: this };
+    } catch (err) {
+      this.db = null;
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  async _createTablesInternal() {
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        email TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        content TEXT,
+        owner_id INTEGER NOT NULL,
+        tags TEXT DEFAULT '[]',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS shares (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        permission TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        token TEXT UNIQUE NOT NULL,
+        expires_at DATETIME
+      )`
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS note_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT,
+        updated_by INTEGER NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`
+    );
+
+    await this.run(
+      `CREATE TABLE IF NOT EXISTS note_shares (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        note_id INTEGER NOT NULL,
+        owner_id INTEGER NOT NULL,
+        shared_with_id INTEGER NOT NULL,
+        can_write INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(note_id, shared_with_id)
+      )`
+    );
+
+    try {
+      const rows = await this.all(`PRAGMA table_info(notes)`);
+      const hasTags = rows && rows.some((r) => r && r.name === 'tags');
+      if (!hasTags) {
+        await this.run(`ALTER TABLE notes ADD COLUMN tags TEXT DEFAULT '[]'`);
+        console.log('[DB] Migrated notes table: added tags column');
+      }
+    } catch (err) {
+      console.warn('[DB] Warning while ensuring tags column:', err && err.message);
+    }
   }
 
   /**
-   * Create necessary tables if they don't exist
+   * X-MAN: run SELECT; returns { success, data: rows }.
    */
-  async createTables() {
-    return new Promise((resolve, reject) => {
-      this.db.serialize(() => {
-          // Notes table (includes tags column as JSON text)
-          this.db.run(
-            `CREATE TABLE IF NOT EXISTS notes (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              title TEXT NOT NULL,
-              content TEXT,
-              owner_id INTEGER NOT NULL,
-              tags TEXT DEFAULT '[]',
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )`,
-            (err) => {
-              if (err) reject(err);
-              else resolve();
-            }
-          );
-          // Note versions table for simple version history
-          this.db.run(
-            `CREATE TABLE IF NOT EXISTS note_versions (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              note_id INTEGER NOT NULL,
-              title TEXT NOT NULL,
-              content TEXT,
-              updated_by INTEGER NOT NULL,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )`,
-            (err) => {
-              if (err) console.warn('[DB] note_versions table creation warning', err);
-            }
-          );
-          // Note sharing table
-          this.db.run(
-            `CREATE TABLE IF NOT EXISTS note_shares (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              note_id INTEGER NOT NULL,
-              owner_id INTEGER NOT NULL,
-              shared_with_id INTEGER NOT NULL,
-              can_write INTEGER DEFAULT 0,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE(note_id, shared_with_id)
-            )`,
-            (err) => {
-              if (err) console.warn('[DB] note_shares table creation warning', err);
-            }
-          );
-      });
-      }).then(async () => {
-        // Ensure tags column exists for older DBs: run PRAGMA table_info and ALTER if missing
-        try {
-          const rows = await this.all(`PRAGMA table_info(notes)`);
-          const hasTags = rows && rows.some((r) => r && r.name === 'tags');
-          if (!hasTags) {
-            await this.run(`ALTER TABLE notes ADD COLUMN tags TEXT DEFAULT '[]'`);
-            console.log('[DB] Migrated notes table: added tags column');
-          }
-        } catch (err) {
-          // Non-fatal migration error
-          console.warn('[DB] Warning while ensuring tags column:', err && err.message);
-        }
-        // Ensure note_versions table exists (for older DBs this is handled by CREATE TABLE IF NOT EXISTS above)
-        try {
-          const rows = await this.all(`PRAGMA table_info(note_versions)`);
-          const hasNoteVersions = rows && rows.length > 0;
-          if (!hasNoteVersions) {
-            await this.run(`CREATE TABLE IF NOT EXISTS note_versions (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              note_id INTEGER NOT NULL,
-              title TEXT NOT NULL,
-              content TEXT,
-              updated_by INTEGER NOT NULL,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )`);
-            console.log('[DB] Created note_versions table');
-          }
-        } catch (err) {
-          console.warn('[DB] Warning while ensuring note_versions table:', err && err.message);
-        }
-        try {
-          const rows = await this.all(`PRAGMA table_info(note_shares)`);
-          const hasNoteShares = rows && rows.length > 0;
-          if (!hasNoteShares) {
-            await this.run(`CREATE TABLE IF NOT EXISTS note_shares (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              note_id INTEGER NOT NULL,
-              owner_id INTEGER NOT NULL,
-              shared_with_id INTEGER NOT NULL,
-              can_write INTEGER DEFAULT 0,
-              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE(note_id, shared_with_id)
-            )`);
-            console.log('[DB] Created note_shares table');
-          }
-        } catch (err) {
-          console.warn('[DB] Warning while ensuring note_shares table:', err && err.message);
-        }
-        return;
-    });
+  async query(sql, params = []) {
+    try {
+      if (!this.db) {
+        return { success: false, error: 'Database not initialized' };
+      }
+      if (typeof sql !== 'string' || !sql.trim()) {
+        return { success: false, error: 'Invalid SQL' };
+      }
+      const rows = await this.all(sql, params);
+      return { success: true, data: rows };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
   }
 
   /**
-   * Run a query and return all rows
+   * X-MAN: insert row object into table; returns { success, data: { id, changes } }.
+   */
+  async insert(table, row) {
+    try {
+      const v = validateTableName(table);
+      if (!v.ok) return { success: false, error: v.error };
+      if (!row || typeof row !== 'object') {
+        return { success: false, error: 'Row must be a non-null object' };
+      }
+      const keys = Object.keys(row).filter((k) => row[k] !== undefined);
+      if (keys.length === 0) {
+        return { success: false, error: 'No columns to insert' };
+      }
+      const placeholders = keys.map(() => '?').join(', ');
+      const cols = keys.join(', ');
+      const vals = keys.map((k) => row[k]);
+      const sql = `INSERT INTO ${table} (${cols}) VALUES (${placeholders})`;
+      const result = await this.run(sql, vals);
+      return { success: true, data: result };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * X-MAN: update by primary key id; returns { success, data: { changes } }.
+   */
+  async update(table, id, patch) {
+    try {
+      const v = validateTableName(table);
+      if (!v.ok) return { success: false, error: v.error };
+      if (id === undefined || id === null) {
+        return { success: false, error: 'id is required' };
+      }
+      if (!patch || typeof patch !== 'object') {
+        return { success: false, error: 'patch must be an object' };
+      }
+      const keys = Object.keys(patch).filter((k) => patch[k] !== undefined && k !== 'id');
+      if (keys.length === 0) {
+        return { success: false, error: 'No fields to update' };
+      }
+      const sets = keys.map((k) => `${k} = ?`).join(', ');
+      const vals = keys.map((k) => patch[k]);
+      vals.push(id);
+      const sql = `UPDATE ${table} SET ${sets} WHERE id = ?`;
+      const result = await this.run(sql, vals);
+      return { success: true, data: { changes: result.changes } };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * X-MAN: delete by primary key id; returns { success, data: { changes } }.
+   */
+  async delete(table, id) {
+    try {
+      const v = validateTableName(table);
+      if (!v.ok) return { success: false, error: v.error };
+      if (id === undefined || id === null) {
+        return { success: false, error: 'id is required' };
+      }
+      const result = await this.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
+      return { success: true, data: { changes: result.changes } };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * X-MAN: close connection; clears singleton if this instance was active.
+   */
+  async close() {
+    try {
+      if (this.db) {
+        await new Promise((resolve, reject) => {
+          this.db.close((err) => {
+            if (err) reject(err);
+            else resolve();
+          });
+        });
+        this.db = null;
+      }
+      if (instance === this) {
+        instance = null;
+      }
+      return { success: true, data: null };
+    } catch (err) {
+      return { success: false, error: err && err.message ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Legacy: run a query and return all rows (may reject).
    */
   all(query, params = []) {
     return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
       this.db.all(query, params, (err, rows) => {
         if (err) reject(err);
         else resolve(rows);
@@ -157,10 +264,14 @@ class Database {
   }
 
   /**
-   * Run a query and return single row
+   * Legacy: run a query and return single row (may reject).
    */
   get(query, params = []) {
     return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
       this.db.get(query, params, (err, row) => {
         if (err) reject(err);
         else resolve(row);
@@ -169,49 +280,46 @@ class Database {
   }
 
   /**
-   * Run an INSERT/UPDATE/DELETE query
+   * Legacy: run INSERT/UPDATE/DELETE (may reject).
    */
   run(query, params = []) {
     return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
       this.db.run(query, params, function (err) {
         if (err) reject(err);
         else resolve({ id: this.lastID, changes: this.changes });
       });
     });
   }
-
-  /**
-   * Close database connection
-   */
-  close() {
-    return new Promise((resolve, reject) => {
-      if (this.db) {
-        this.db.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      } else {
-        resolve();
-      }
-    });
-  }
 }
 
-// Singleton instance
-let instance = null;
-
 /**
- * Get or create database instance
+ * Get or create database singleton.
  */
 async function getDb() {
   if (!instance) {
-    instance = new Database();
-    await instance.init();
+    const db = new Database();
+    const result = await db.init();
+    if (!result.success) {
+      throw new Error(result.error);
+    }
+    instance = db;
   }
   return instance;
+}
+
+/**
+ * Reset singleton (e.g. tests after close).
+ */
+function resetDbSingleton() {
+  instance = null;
 }
 
 module.exports = {
   getDb,
   Database,
+  resetDbSingleton,
 };

@@ -1,8 +1,24 @@
 {
   "name": "@collabnotes/web",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
-    "dev": "echo 'Web app development server'"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "next": "latest",
+    "@tailwindcss/postcss": "latest",
+    "autoprefixer": "latest",
+    "postcss": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-hot-toast": "latest",
+    "socket.io-client": "latest",
+    "tailwindcss": "latest",
+    "@collabnotes/shared-auth": "file:../../packages/shared-auth",
+    "@collabnotes/shared-notes": "file:../../packages/shared-notes",
+    "@collabnotes/shared-sharing": "file:../../packages/shared-sharing",
+    "@collabnotes/shared-search": "file:../../packages/shared-search"
   }
 }

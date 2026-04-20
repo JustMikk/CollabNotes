@@ -1,5 +1,9 @@
 {
   "name": "@collabnotes/shared-search",
   "version": "1.0.0",
-  "main": "index.js"
+  "main": "index.js",
+  "dependencies": {
+    "@collabnotes/shared-database": "file:../shared-database",
+    "@collabnotes/shared-notes": "file:../shared-notes"
+  }
 }

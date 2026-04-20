@@ -1,0 +1,8 @@
+node_modules
+dist
+.turbo
+*.db
+test.db
+.env
+.DS_Store
+*.log

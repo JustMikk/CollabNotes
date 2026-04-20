@@ -1,0 +1,14 @@
+{
+  "name": "@collabnotes/api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@collabnotes/shared-database": "file:../packages/shared-database",
+    "@collabnotes/shared-notes": "file:../packages/shared-notes"
+  }
+}

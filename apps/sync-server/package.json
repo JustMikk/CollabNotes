@@ -1,0 +1,12 @@
+{
+  "name": "@collabnotes/sync-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "@collabnotes/shared-auth": "file:../../packages/shared-auth",
+    "@collabnotes/shared-sync": "file:../../packages/shared-sync"
+  }
+}

@@ -9,6 +9,7 @@
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "@collabnotes/shared-database": "file:../packages/shared-database",
-    "@collabnotes/shared-notes": "file:../packages/shared-notes"
+    "@collabnotes/shared-notes": "file:../packages/shared-notes",
+    "@collabnotes/shared-auth": "file:../packages/shared-auth"
   }
 }

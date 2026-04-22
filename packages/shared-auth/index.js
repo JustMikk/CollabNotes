@@ -1,64 +1,170 @@
 /**
- * Shared Auth Module (placeholder)
- * verifyToken is a small placeholder to allow local development.
- * Real implementation should verify JWTs or session tokens.
+ * Shared Auth — register, login, sessions (Objects-as-components; refactor in Iteration 7).
  */
 
-const users = new Map();
-const tokens = new Map();
-let seq = 100;
+const crypto = require('crypto');
+const bcrypt = require('bcrypt');
 
-function createToken(user) {
-	const token = `tok_${user.id}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-	tokens.set(token, user);
-	return token;
+let getDb;
+try {
+  ({ getDb } = require('@collabnotes/shared-database'));
+} catch (e) {
+  ({ getDb } = require('../shared-database'));
 }
 
+const BCRYPT_ROUNDS = 10;
+const SESSION_DAYS = 7;
+
+function sessionExpiresAt() {
+  return new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * @param {string} username
+ * @param {string} password
+ * @param {string} [email]
+ * @returns {Promise<{ success: boolean, data?: object, error?: string }>}
+ */
+async function register(username, password, email) {
+  try {
+    if (!username || !password) {
+      return { success: false, error: 'username and password are required' };
+    }
+    const db = await getDb();
+    const key = String(username).trim();
+    const existing = await db.get(`SELECT id FROM users WHERE lower(username) = lower(?)`, [key]);
+    if (existing) {
+      return { success: false, error: 'Username already taken' };
+    }
+    const hash = await bcrypt.hash(String(password), BCRYPT_ROUNDS);
+    const result = await db.run(
+      `INSERT INTO users (username, password, email) VALUES (?, ?, ?)`,
+      [key, hash, email != null ? String(email) : null]
+    );
+    const row = await db.get(`SELECT id, username, email, created_at FROM users WHERE id = ?`, [result.id]);
+    return { success: true, data: row };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{ success: boolean, data?: { token: string, user: object }, error?: string }>}
+ */
+async function login(username, password) {
+  try {
+    if (!username || !password) {
+      return { success: false, error: 'username and password are required' };
+    }
+    const db = await getDb();
+    const key = String(username).trim();
+    const row = await db.get(`SELECT * FROM users WHERE lower(username) = lower(?)`, [key]);
+    if (!row) {
+      return { success: false, error: 'Invalid credentials' };
+    }
+    const ok = await bcrypt.compare(String(password), row.password);
+    if (!ok) {
+      return { success: false, error: 'Invalid credentials' };
+    }
+    const token = generateToken();
+    const expiresAt = sessionExpiresAt();
+    await db.run(`INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)`, [
+      row.id,
+      token,
+      expiresAt,
+    ]);
+    const user = { id: row.id, username: row.username, email: row.email };
+    return { success: true, data: { token, user } };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * Validate session token. Returns user object for middleware, or null.
+ * @param {string} token
+ * @returns {Promise<object|null>}
+ */
+async function verifyToken(token) {
+  try {
+    if (!token) return null;
+    const db = await getDb();
+    const row = await db.get(
+      `SELECT u.id, u.username, u.email, s.expires_at AS session_expires
+       FROM sessions s
+       INNER JOIN users u ON u.id = s.user_id
+       WHERE s.token = ?`,
+      [token]
+    );
+    if (!row) return null;
+    if (row.session_expires && new Date(row.session_expires) <= new Date()) {
+      await db.run(`DELETE FROM sessions WHERE token = ?`, [token]);
+      return null;
+    }
+    return { id: row.id, username: row.username, email: row.email };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * @param {string} token
+ * @returns {Promise<{ success: boolean, data?: null, error?: string }>}
+ */
+async function logout(token) {
+  try {
+    if (!token) {
+      return { success: false, error: 'token is required' };
+    }
+    const db = await getDb();
+    await db.run(`DELETE FROM sessions WHERE token = ?`, [token]);
+    return { success: true, data: null };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * @param {number} id
+ * @returns {Promise<{ success: boolean, data?: object, error?: string }>}
+ */
+async function getUserById(id) {
+  try {
+    if (!id) {
+      return { success: false, error: 'id is required' };
+    }
+    const db = await getDb();
+    const row = await db.get(`SELECT id, username, email, created_at FROM users WHERE id = ?`, [id]);
+    if (!row) {
+      return { success: false, error: 'User not found' };
+    }
+    return { success: true, data: row };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/** API alias — email omitted */
 async function registerUser(username, password) {
-	if (!username || !password) return { success: false, error: 'username and password are required' };
-	const key = String(username).toLowerCase();
-	if (users.has(key)) return { success: false, error: 'User already exists' };
-	const user = { id: seq++, username: String(username) };
-	users.set(key, { ...user, password: String(password) });
-	return { success: true, data: { id: user.id, username: user.username } };
+  return register(username, password, undefined);
 }
 
 async function loginUser(username, password) {
-	if (!username || !password) return { success: false, error: 'username and password are required' };
-	const key = String(username).toLowerCase();
-	const row = users.get(key);
-	if (!row || row.password !== String(password)) return { success: false, error: 'Invalid credentials' };
-	const user = { id: row.id, username: row.username };
-	const token = createToken(user);
-	return { success: true, data: { token, user } };
-}
-
-async function verifyToken(token) {
-	if (!token) return null;
-
-	if (tokens.has(token)) {
-		return tokens.get(token);
-	}
-
-	// Development placeholder behavior:
-	// - If token === 'test' -> returns test user { id: 1 }
-	// - If token begins with 'user:' -> parse id (e.g. 'user:5')
-	// - Otherwise, attempt to parse numeric token as user id
-	if (token === 'test') return { id: 1, name: 'Test User' };
-
-	if (token.startsWith && token.startsWith('user:')) {
-		const id = parseInt(token.split(':')[1], 10) || 0;
-		if (id) return { id, name: `User ${id}` };
-	}
-
-	const numeric = parseInt(token, 10);
-	if (!Number.isNaN(numeric) && numeric > 0) return { id: numeric, name: `User ${numeric}` };
-
-	return null;
+  return login(username, password);
 }
 
 module.exports = {
-	registerUser,
-	loginUser,
-	verifyToken,
+  register,
+  login,
+  verifyToken,
+  logout,
+  getUserById,
+  registerUser,
+  loginUser,
 };

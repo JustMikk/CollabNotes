@@ -78,8 +78,8 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRouter);
 
 // Mount notes router with auth middleware
+app.use('/api/notes', authMiddleware, sharingRouter);
 app.use('/api/notes', authMiddleware, notesRouter);
-app.use('/api/shares', authMiddleware, sharingRouter);
 
 // GET /api/search?q=query
 app.get('/api/search', authMiddleware, async (req, res, next) => {

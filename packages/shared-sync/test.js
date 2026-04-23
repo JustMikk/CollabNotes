@@ -7,12 +7,23 @@ function waitForOpen(ws) {
   return new Promise((resolve) => ws.on('open', resolve));
 }
 
-function waitForMessage(ws, type) {
+function waitForMessage(ws, type, timeoutMs = 1500) {
   return new Promise((resolve) => {
-    ws.on('message', (raw) => {
+    const timer = setTimeout(() => {
+      ws.off('message', onMessage);
+      resolve(null);
+    }, timeoutMs);
+
+    function onMessage(raw) {
       const parsed = JSON.parse(raw.toString());
-      if (!type || parsed.type === type) resolve(parsed);
-    });
+      if (!type || parsed.type === type) {
+        clearTimeout(timer);
+        ws.off('message', onMessage);
+        resolve(parsed);
+      }
+    }
+
+    ws.on('message', onMessage);
   });
 }
 
@@ -37,6 +48,7 @@ async function run() {
   const p = await waitForMessage(c1, 'presence');
   assert.equal(p.noteId, 99);
   assert.ok(Array.isArray(p.users));
+  assert.ok(p.users.length >= 1);
 
   c1.send(JSON.stringify({ type: 'cursor', noteId: 99, position: { line: 2, ch: 3 } }));
   const cursor = await waitForMessage(c2, 'cursor');
@@ -59,9 +71,12 @@ async function run() {
   const t = transformOperations([{ retain: 2 }, { insert: 'X' }], [{ insert: 'A' }]);
   assert.equal(t[0].retain, 1);
 
+  c2.close();
+  const p2 = await waitForMessage(c1, 'presence');
+  assert.ok(p2 && p2.users.length === 1);
+
   c1.send(JSON.stringify({ type: 'leave', noteId: 99 }));
   c1.close();
-  c2.close();
   sync.close();
 }
 

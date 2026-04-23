@@ -33,6 +33,7 @@ class SyncServer {
 
       ws.on('pong', () => {
         ws.isAlive = true;
+        ws.lastPongAt = Date.now();
       });
 
       ws.on('message', (raw) => this.handleMessage(ws, raw));
@@ -43,6 +44,7 @@ class SyncServer {
     this.heartbeat = setInterval(() => {
       this.wss.clients.forEach((client) => {
         if (!client.isAlive) {
+          this.handleDisconnect(client);
           client.terminate();
           return;
         }
@@ -93,7 +95,10 @@ class SyncServer {
   joinRoom(ws, noteId) {
     const room = this.roomFor(noteId);
     room.clients.add(ws);
-    room.users.set(ws, { user: { id: ws.user.id, name: ws.user.name || ws.user.username } });
+    room.users.set(ws, {
+      user: { id: ws.user.id, name: ws.user.name || ws.user.username },
+      lastSeenAt: Date.now(),
+    });
     ws.rooms.add(noteId);
 
     const cursors = Array.from(room.cursors.entries()).map(([userId, position]) => ({
@@ -116,6 +121,18 @@ class SyncServer {
     } else {
       this.broadcastPresence(noteId);
     }
+  }
+
+  refreshPresence(ws) {
+    if (!ws || !ws.rooms) return;
+    const now = Date.now();
+    Array.from(ws.rooms).forEach((noteId) => {
+      const room = this.rooms.get(noteId);
+      if (!room) return;
+      const entry = room.users.get(ws);
+      if (!entry) return;
+      entry.lastSeenAt = now;
+    });
   }
 
   broadcastCursor(noteId, userId, position) {
@@ -161,6 +178,7 @@ class SyncServer {
       safeSend(ws, { type: 'error', error: 'Invalid message' });
       return;
     }
+    this.refreshPresence(ws);
 
     const noteId = Number(message.noteId);
     if (Number.isNaN(noteId) || noteId <= 0) {

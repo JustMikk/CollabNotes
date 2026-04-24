@@ -6,6 +6,25 @@
 
 const { getDb } = require('@collabnotes/shared-database');
 
+function normalizeTags(input) {
+  if (!input) return [];
+  if (Array.isArray(input)) return input.map((t) => String(t).trim()).filter(Boolean);
+  if (typeof input === 'string') {
+    // Accept JSON array string or comma-separated
+    const trimmed = input.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.map((t) => String(t).trim()).filter(Boolean);
+      } catch (e) {
+        // fallthrough
+      }
+    }
+    return trimmed.split(',').map((t) => t.trim()).filter(Boolean);
+  }
+  return [];
+}
+
 /**
  * Create a new note
  * @param {number} ownerId - User ID of the note owner
@@ -20,12 +39,20 @@ async function createNote(ownerId, title, content) {
     }
 
     const db = await getDb();
+    const tagsArr = normalizeTags(arguments[3] || (typeof arguments[2] === 'object' && arguments[2] ? arguments[2].tags : undefined)) || [];
+    // If caller passed content as third arg and tags separately, we support explicit param order in future.
+    // For now callers should pass (ownerId, title, content, tags)
+    const tagsJson = JSON.stringify(tagsArr);
+
     const result = await db.run(
-      `INSERT INTO notes (title, content, owner_id) VALUES (?, ?, ?)`,
-      [title, content || '', ownerId]
+      `INSERT INTO notes (title, content, owner_id, tags) VALUES (?, ?, ?, ?)`,
+      [title, content || '', ownerId, tagsJson]
     );
 
     const note = await db.get(`SELECT * FROM notes WHERE id = ?`, [result.id]);
+    if (note && note.tags) {
+      try { note.tags = JSON.parse(note.tags); } catch (e) { note.tags = []; }
+    }
     return { success: true, data: note };
   } catch (error) {
     return { success: false, error: error.message };
@@ -54,6 +81,9 @@ async function getNoteById(id, userId) {
       return { success: false, error: 'Note not found or access denied' };
     }
 
+    if (note && note.tags) {
+      try { note.tags = JSON.parse(note.tags); } catch (e) { note.tags = []; }
+    }
     return { success: true, data: note };
   } catch (error) {
     return { success: false, error: error.message };
@@ -76,8 +106,16 @@ async function getUserNotes(userId) {
       `SELECT * FROM notes WHERE owner_id = ? ORDER BY updated_at DESC`,
       [userId]
     );
+    const parsed = notes.map((n) => {
+      if (n && n.tags) {
+        try { n.tags = JSON.parse(n.tags); } catch (e) { n.tags = []; }
+      } else {
+        n.tags = [];
+      }
+      return n;
+    });
 
-    return { success: true, data: notes };
+    return { success: true, data: parsed };
   } catch (error) {
     return { success: false, error: error.message };
   }
@@ -121,13 +159,23 @@ async function updateNote(id, userId, updates) {
       values.push(updates.content);
     }
 
+    if (updates.tags !== undefined) {
+      const tagsArr = normalizeTags(updates.tags);
+      fields.push('tags = ?');
+      values.push(JSON.stringify(tagsArr));
+    }
+
     fields.push('updated_at = CURRENT_TIMESTAMP');
+    // Append WHERE params after SET values
     values.push(id, userId);
 
     const query = `UPDATE notes SET ${fields.join(', ')} WHERE id = ? AND owner_id = ?`;
     await db.run(query, values);
 
     const updatedNote = await db.get(`SELECT * FROM notes WHERE id = ?`, [id]);
+    if (updatedNote && updatedNote.tags) {
+      try { updatedNote.tags = JSON.parse(updatedNote.tags); } catch (e) { updatedNote.tags = []; }
+    }
     return { success: true, data: updatedNote };
   } catch (error) {
     return { success: false, error: error.message };
@@ -183,8 +231,63 @@ async function getAllNotes(userId) {
       `SELECT * FROM notes WHERE owner_id = ? ORDER BY updated_at DESC`,
       [userId]
     );
+    const parsed = notes.map((n) => {
+      if (n && n.tags) {
+        try { n.tags = JSON.parse(n.tags); } catch (e) { n.tags = []; }
+      } else {
+        n.tags = [];
+      }
+      return n;
+    });
+    return { success: true, data: parsed };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
 
-    return { success: true, data: notes };
+/**
+ * Get notes by tag for a user
+ */
+async function getNotesByTag(userId, tag) {
+  try {
+    if (!userId || !tag) return { success: false, error: 'userId and tag are required' };
+    const db = await getDb();
+    // Match JSON array content containing the tag string
+    const pattern = `%"${tag}"%`;
+    const notes = await db.all(`SELECT * FROM notes WHERE owner_id = ? AND tags LIKE ? ORDER BY updated_at DESC`, [userId, pattern]);
+    const parsed = notes.map((n) => {
+      if (n && n.tags) {
+        try { n.tags = JSON.parse(n.tags); } catch (e) { n.tags = []; }
+      } else {
+        n.tags = [];
+      }
+      return n;
+    });
+    return { success: true, data: parsed };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Get all unique tags used by a user
+ */
+async function getAllTags(userId) {
+  try {
+    if (!userId) return { success: false, error: 'userId is required' };
+    const db = await getDb();
+    const notes = await db.all(`SELECT tags FROM notes WHERE owner_id = ?`, [userId]);
+    const tagSet = new Set();
+    notes.forEach((r) => {
+      if (!r || !r.tags) return;
+      try {
+        const arr = JSON.parse(r.tags);
+        if (Array.isArray(arr)) arr.forEach((t) => { if (t) tagSet.add(String(t).trim()); });
+      } catch (e) {
+        // ignore
+      }
+    });
+    return { success: true, data: Array.from(tagSet) };
   } catch (error) {
     return { success: false, error: error.message };
   }

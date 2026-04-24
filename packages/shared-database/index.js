@@ -42,22 +42,37 @@ class Database {
   async createTables() {
     return new Promise((resolve, reject) => {
       this.db.serialize(() => {
-        // Notes table
-        this.db.run(
-          `CREATE TABLE IF NOT EXISTS notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT,
-            owner_id INTEGER NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-          )`,
-          (err) => {
-            if (err) reject(err);
-            else resolve();
-          }
-        );
+          // Notes table (includes tags column as JSON text)
+          this.db.run(
+            `CREATE TABLE IF NOT EXISTS notes (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              title TEXT NOT NULL,
+              content TEXT,
+              owner_id INTEGER NOT NULL,
+              tags TEXT DEFAULT '[]',
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`,
+            (err) => {
+              if (err) reject(err);
+              else resolve();
+            }
+          );
       });
+      }).then(async () => {
+        // Ensure tags column exists for older DBs: run PRAGMA table_info and ALTER if missing
+        try {
+          const rows = await this.all(`PRAGMA table_info(notes)`);
+          const hasTags = rows && rows.some((r) => r && r.name === 'tags');
+          if (!hasTags) {
+            await this.run(`ALTER TABLE notes ADD COLUMN tags TEXT DEFAULT '[]'`);
+            console.log('[DB] Migrated notes table: added tags column');
+          }
+        } catch (err) {
+          // Non-fatal migration error
+          console.warn('[DB] Warning while ensuring tags column:', err && err.message);
+        }
+        return;
     });
   }
 

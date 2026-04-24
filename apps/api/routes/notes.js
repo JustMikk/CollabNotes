@@ -4,10 +4,14 @@ const notesModule = require('@collabnotes/shared-notes');
 const router = express.Router();
 
 // GET /api/notes - Get all notes (owned + shared)
+// Optional query param: ?tag=tagName
 router.get('/', async (req, res) => {
   try {
     const userId = req.user && req.user.id;
-    const result = await notesModule.getAllNotes(userId);
+    const tag = req.query.tag;
+    let result;
+    if (tag) result = await notesModule.getNotesByTag(userId, tag);
+    else result = await notesModule.getAllNotes(userId);
     if (result.success) return res.json(result.data);
     return res.status(400).json({ error: result.error });
   } catch (err) {
@@ -34,8 +38,8 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const userId = req.user && req.user.id;
-    const { title, content } = req.body;
-    const result = await notesModule.createNote(userId, title, content);
+    const { title, content, tags } = req.body;
+    const result = await notesModule.createNote(userId, title, content, tags);
     if (result.success) return res.status(201).json(result.data);
     return res.status(400).json({ error: result.error });
   } catch (err) {
@@ -49,7 +53,7 @@ router.put('/:id', async (req, res) => {
   try {
     const noteId = parseInt(req.params.id, 10);
     const userId = req.user && req.user.id;
-    const updates = req.body;
+    const updates = req.body; // may include title, content, tags
 
     const result = await notesModule.updateNote(noteId, userId, updates);
     if (result.success) return res.json(result.data);

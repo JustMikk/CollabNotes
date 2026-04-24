@@ -23,6 +23,19 @@ app.get('/health', (req, res) => {
 // Mount notes router with auth middleware
 app.use('/api/notes', authMiddleware, notesRouter);
 
+// GET /api/tags - return all unique tags for user
+app.get('/api/tags', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user && req.user.id;
+    const result = await require('@collabnotes/shared-notes').getAllTags(userId);
+    if (result.success) return res.json(result.data);
+    return res.status(400).json({ error: result.error });
+  } catch (err) {
+    console.error('[TAGS] GET /api/tags', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Generic error handler
 app.use((err, req, res, next) => {
   console.error('[API ERROR]', err);

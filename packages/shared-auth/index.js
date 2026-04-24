@@ -23,6 +23,18 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
+/** Remove expired sessions (called on login/verify; safe to call anytime). */
+async function cleanupExpiredSessions() {
+  try {
+    const db = await getDb();
+    const now = new Date().toISOString();
+    await db.run(`DELETE FROM sessions WHERE expires_at < ?`, [now]);
+    return { success: true, data: { cleaned: true } };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
 /**
  * @param {string} username
  * @param {string} password
@@ -62,6 +74,7 @@ async function login(username, password) {
     if (!username || !password) {
       return { success: false, error: 'username and password are required' };
     }
+    await cleanupExpiredSessions();
     const db = await getDb();
     const key = String(username).trim();
     const row = await db.get(`SELECT * FROM users WHERE lower(username) = lower(?)`, [key]);
@@ -94,6 +107,7 @@ async function login(username, password) {
 async function verifyToken(token) {
   try {
     if (!token) return null;
+    await cleanupExpiredSessions();
     const db = await getDb();
     const row = await db.get(
       `SELECT u.id, u.username, u.email, s.expires_at AS session_expires
@@ -167,4 +181,5 @@ module.exports = {
   getUserById,
   registerUser,
   loginUser,
+  cleanupExpiredSessions,
 };

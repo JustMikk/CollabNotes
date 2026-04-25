@@ -4,5 +4,11 @@
   "main": "index.js",
   "bin": {
     "collabnotes": "./index.js"
+  },
+  "dependencies": {
+    "readline": "^1.3.0",
+    "@collabnotes/shared-auth": "file:../../packages/shared-auth",
+    "@collabnotes/shared-notes": "file:../../packages/shared-notes",
+    "@collabnotes/shared-sharing": "file:../../packages/shared-sharing"
   }
 }

@@ -55,6 +55,13 @@ async function run() {
   assert.equal(cursor.userId, 1);
   assert.equal(cursor.position.line, 2);
 
+  const c3 = new WebSocket('ws://localhost:3012?token=3');
+  await waitForOpen(c3);
+  c3.send(JSON.stringify({ type: 'join', noteId: 99 }));
+  const cursorSync = await waitForMessage(c3, 'cursor:sync');
+  assert.ok(cursorSync && Array.isArray(cursorSync.cursors));
+  assert.ok(cursorSync.cursors.some((entry) => entry.userId === 1));
+
   c1.send(
     JSON.stringify({
       type: 'edit',
@@ -73,10 +80,13 @@ async function run() {
 
   c2.close();
   const p2 = await waitForMessage(c1, 'presence');
-  assert.ok(p2 && p2.users.length === 1);
+  assert.ok(p2 && Array.isArray(p2.users));
+  assert.ok(p2.users.some((user) => user.id === 1));
+  assert.ok(!p2.users.some((user) => user.id === 2));
 
   c1.send(JSON.stringify({ type: 'leave', noteId: 99 }));
   c1.close();
+  c3.close();
   sync.close();
 }
 

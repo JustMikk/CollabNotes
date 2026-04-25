@@ -101,10 +101,7 @@ class SyncServer {
     });
     ws.rooms.add(noteId);
 
-    const cursors = Array.from(room.cursors.entries()).map(([userId, position]) => ({
-      userId,
-      position,
-    }));
+    const cursors = this.getCursorPositions(noteId);
     safeSend(ws, { type: 'cursor:sync', noteId, cursors });
     this.broadcastPresence(noteId);
   }
@@ -139,7 +136,15 @@ class SyncServer {
     const room = this.rooms.get(noteId);
     if (!room) return;
     room.cursors.set(userId, position);
-    this.broadcast(noteId, { type: 'cursor', noteId, userId, position });
+  }
+
+  getCursorPositions(noteId) {
+    const room = this.rooms.get(noteId);
+    if (!room) return [];
+    return Array.from(room.cursors.entries()).map(([userId, position]) => ({
+      userId,
+      position,
+    }));
   }
 
   processEdit(ws, message) {
@@ -198,6 +203,11 @@ class SyncServer {
         break;
       case 'cursor':
         this.broadcastCursor(noteId, ws.user.id, message.position);
+        this.broadcast(
+          noteId,
+          { type: 'cursor', noteId, userId: ws.user.id, position: message.position },
+          ws
+        );
         break;
       case 'edit':
         this.processEdit(ws, message);

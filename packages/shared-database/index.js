@@ -58,6 +58,20 @@ class Database {
               else resolve();
             }
           );
+          // Note versions table for simple version history
+          this.db.run(
+            `CREATE TABLE IF NOT EXISTS note_versions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              note_id INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              content TEXT,
+              updated_by INTEGER NOT NULL,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`,
+            (err) => {
+              if (err) console.warn('[DB] note_versions table creation warning', err);
+            }
+          );
       });
       }).then(async () => {
         // Ensure tags column exists for older DBs: run PRAGMA table_info and ALTER if missing
@@ -71,6 +85,24 @@ class Database {
         } catch (err) {
           // Non-fatal migration error
           console.warn('[DB] Warning while ensuring tags column:', err && err.message);
+        }
+        // Ensure note_versions table exists (for older DBs this is handled by CREATE TABLE IF NOT EXISTS above)
+        try {
+          const rows = await this.all(`PRAGMA table_info(note_versions)`);
+          const hasNoteVersions = rows && rows.length > 0;
+          if (!hasNoteVersions) {
+            await this.run(`CREATE TABLE IF NOT EXISTS note_versions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              note_id INTEGER NOT NULL,
+              title TEXT NOT NULL,
+              content TEXT,
+              updated_by INTEGER NOT NULL,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )`);
+            console.log('[DB] Created note_versions table');
+          }
+        } catch (err) {
+          console.warn('[DB] Warning while ensuring note_versions table:', err && err.message);
         }
         return;
     });

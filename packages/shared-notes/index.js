@@ -145,7 +145,18 @@ async function updateNote(id, userId, updates) {
       return { success: false, error: 'Note not found or access denied' };
     }
 
-    // Build update query
+      // Save previous version before applying updates
+      try {
+        await db.run(
+          `INSERT INTO note_versions (note_id, title, content, updated_by) VALUES (?, ?, ?, ?)`,
+          [id, note.title, note.content, userId]
+        );
+      } catch (e) {
+        // Non-fatal: continue if versions table isn't available
+        console.warn('[NOTES] Could not write note_versions entry:', e && e.message);
+      }
+
+      // Build update query
     const fields = [];
     const values = [];
 
@@ -181,6 +192,58 @@ async function updateNote(id, userId, updates) {
     return { success: false, error: error.message };
   }
 }
+
+  /**
+   * Get version history for a note (owner only)
+   */
+  async function getNoteVersions(noteId, userId) {
+    try {
+      if (!noteId || !userId) return { success: false, error: 'noteId and userId are required' };
+      const db = await getDb();
+      // Verify ownership
+      const note = await db.get(`SELECT * FROM notes WHERE id = ? AND owner_id = ?`, [noteId, userId]);
+      if (!note) return { success: false, error: 'Note not found or access denied' };
+
+      const versions = await db.all(`SELECT id, note_id, title, content, updated_by, created_at FROM note_versions WHERE note_id = ? ORDER BY created_at DESC`, [noteId]);
+      return { success: true, data: versions };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Restore a version: saves current state as a version, then updates note to selected version
+   */
+  async function restoreVersion(noteId, versionId, userId) {
+    try {
+      if (!noteId || !versionId || !userId) return { success: false, error: 'noteId, versionId and userId are required' };
+      const db = await getDb();
+      // Verify ownership
+      const note = await db.get(`SELECT * FROM notes WHERE id = ? AND owner_id = ?`, [noteId, userId]);
+      if (!note) return { success: false, error: 'Note not found or access denied' };
+
+      const version = await db.get(`SELECT * FROM note_versions WHERE id = ? AND note_id = ?`, [versionId, noteId]);
+      if (!version) return { success: false, error: 'Version not found' };
+
+      // Save current as a new version
+      try {
+        await db.run(`INSERT INTO note_versions (note_id, title, content, updated_by) VALUES (?, ?, ?, ?)`, [noteId, note.title, note.content, userId]);
+      } catch (e) {
+        console.warn('[NOTES] Could not write current snapshot to note_versions before restore:', e && e.message);
+      }
+
+      // Update note with version content
+      await db.run(`UPDATE notes SET title = ?, content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ?`, [version.title, version.content, noteId, userId]);
+
+      const updatedNote = await db.get(`SELECT * FROM notes WHERE id = ?`, [noteId]);
+      if (updatedNote && updatedNote.tags) {
+        try { updatedNote.tags = JSON.parse(updatedNote.tags); } catch (e) { updatedNote.tags = []; }
+      }
+      return { success: true, data: updatedNote };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  }
 
 /**
  * Delete a note
@@ -300,4 +363,8 @@ module.exports = {
   updateNote,
   deleteNote,
   getAllNotes,
+  getNotesByTag,
+  getAllTags,
+  getNoteVersions,
+  restoreVersion,
 };

@@ -10,6 +10,8 @@ const authMiddleware = require('./middleware/auth');
 const notesRouter = require('./routes/notes');
 const authRouter = require('./routes/auth');
 const sharingRouter = require('./routes/sharing');
+const searchModule = require('@collabnotes/shared-search');
+const notifications = require('./lib/notifications');
 
 const app = express();
 const PORT = 3001;
@@ -78,6 +80,33 @@ app.use('/api/auth', authRouter);
 // Mount notes router with auth middleware
 app.use('/api/notes', authMiddleware, notesRouter);
 app.use('/api/shares', authMiddleware, sharingRouter);
+
+// GET /api/search?q=query
+app.get('/api/search', authMiddleware, async (req, res, next) => {
+  try {
+    const userId = req.user && req.user.id;
+    const query = String(req.query.q || '').trim();
+    if (!query) return res.apiError(400, 'SEARCH_001', 'Query parameter q is required');
+    const result = await searchModule.searchNotes(userId, query);
+    if (result.success) return res.json(result.data);
+    return res.apiError(400, 'SEARCH_002', result.error || 'Unable to search notes');
+  } catch (err) {
+    console.error('[SEARCH] GET /api/search', err);
+    next(err);
+  }
+});
+
+app.get('/api/notifications', authMiddleware, (req, res) => {
+  const userId = req.user.id;
+  res.json({ success: true, data: notifications.getNotifications(userId) });
+});
+
+app.post('/api/notifications/:id/read', authMiddleware, (req, res) => {
+  const userId = req.user.id;
+  const id = Number(req.params.id);
+  notifications.markRead(userId, id);
+  res.json({ success: true, data: { id } });
+});
 
 // GET /api/tags - return all unique tags for user
 app.get('/api/tags', authMiddleware, async (req, res, next) => {

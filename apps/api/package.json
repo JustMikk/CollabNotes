@@ -12,6 +12,7 @@
     "@collabnotes/shared-database": "file:../packages/shared-database",
     "@collabnotes/shared-notes": "file:../packages/shared-notes",
     "@collabnotes/shared-auth": "file:../packages/shared-auth",
-    "@collabnotes/shared-sharing": "file:../packages/shared-sharing"
+    "@collabnotes/shared-sharing": "file:../packages/shared-sharing",
+    "@collabnotes/shared-search": "file:../packages/shared-search"
   }
 }

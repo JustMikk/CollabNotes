@@ -27,6 +27,26 @@ function validateTableName(table) {
   return { ok: true };
 }
 
+/** Human-readable messages for common SQLite errors (X-MAN callers never receive raw throws). */
+function formatSqliteError(err) {
+  if (!err) return 'Unknown database error';
+  const code = err.code;
+  const msg = err.message || String(err);
+  if (code === 'SQLITE_CONSTRAINT' || /UNIQUE constraint failed/i.test(msg)) {
+    return 'Constraint violation: duplicate unique value or foreign key conflict';
+  }
+  if (/SQLITE_CONSTRAINT_FOREIGNKEY/i.test(code) || /FOREIGN KEY constraint failed/i.test(msg)) {
+    return 'Constraint violation: referenced row missing (foreign key)';
+  }
+  if (code === 'SQLITE_ERROR' && /no such table/i.test(msg)) {
+    return 'SQL error: table does not exist';
+  }
+  if (code === 'SQLITE_ERROR' && /no such column/i.test(msg)) {
+    return 'SQL error: column does not exist';
+  }
+  return msg;
+}
+
 // Singleton — one connection per process (SQLite file semantics).
 let instance = null;
 
@@ -150,7 +170,45 @@ class Database {
       const rows = await this.all(sql, params);
       return { success: true, data: rows };
     } catch (err) {
-      return { success: false, error: err && err.message ? err.message : String(err) };
+      return { success: false, error: formatSqliteError(err) };
+    }
+  }
+
+  /**
+   * X-MAN: fetch one row by primary key `id`.
+   */
+  async getById(table, id) {
+    try {
+      const v = validateTableName(table);
+      if (!v.ok) return { success: false, error: v.error };
+      if (id === undefined || id === null) {
+        return { success: false, error: 'id is required' };
+      }
+      const row = await this.get(`SELECT * FROM ${table} WHERE id = ?`, [id]);
+      return { success: true, data: row != null ? row : null };
+    } catch (err) {
+      return { success: false, error: formatSqliteError(err) };
+    }
+  }
+
+  /**
+   * X-MAN: check sqlite_master for a table (identifier must be safe).
+   */
+  async tableExists(table) {
+    try {
+      if (typeof table !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) {
+        return { success: false, error: 'Invalid table identifier' };
+      }
+      if (!this.db) {
+        return { success: false, error: 'Database not initialized' };
+      }
+      const row = await this.get(
+        `SELECT 1 as ok FROM sqlite_master WHERE type = 'table' AND name = ?`,
+        [table]
+      );
+      return { success: true, data: !!row };
+    } catch (err) {
+      return { success: false, error: formatSqliteError(err) };
     }
   }
 
@@ -175,7 +233,7 @@ class Database {
       const result = await this.run(sql, vals);
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err && err.message ? err.message : String(err) };
+      return { success: false, error: formatSqliteError(err) };
     }
   }
 
@@ -203,7 +261,7 @@ class Database {
       const result = await this.run(sql, vals);
       return { success: true, data: { changes: result.changes } };
     } catch (err) {
-      return { success: false, error: err && err.message ? err.message : String(err) };
+      return { success: false, error: formatSqliteError(err) };
     }
   }
 
@@ -220,7 +278,7 @@ class Database {
       const result = await this.run(`DELETE FROM ${table} WHERE id = ?`, [id]);
       return { success: true, data: { changes: result.changes } };
     } catch (err) {
-      return { success: false, error: err && err.message ? err.message : String(err) };
+      return { success: false, error: formatSqliteError(err) };
     }
   }
 

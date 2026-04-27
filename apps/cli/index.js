@@ -147,6 +147,54 @@ async function shareNote() {
   console.log(`Shared note #${noteId} with user #${result.data.userId} (${result.data.permission})`);
 }
 
+async function listNoteAccess() {
+  const user = await requireUser();
+  if (!user) return;
+  const noteId = Number(await ask('Note ID: '));
+  if (!Number.isInteger(noteId) || noteId <= 0) {
+    console.log('Invalid note ID.');
+    return;
+  }
+  const result = await sharing.getNoteAccessList(noteId, user.id);
+  if (!result.success) {
+    if (String(result.error || '').toLowerCase().includes('denied')) {
+      console.log('Permission denied: only the note owner can list access.');
+      return;
+    }
+    console.log(`Could not load access list: ${result.error}`);
+    return;
+  }
+  if (!result.data.length) {
+    console.log('No shared users for this note.');
+    return;
+  }
+  result.data.forEach((entry) => {
+    const label = entry.username || entry.email || `user-${entry.user_id}`;
+    console.log(`- ${label} (id: ${entry.user_id}) -> ${entry.permission}`);
+  });
+}
+
+async function revokeAccess() {
+  const user = await requireUser();
+  if (!user) return;
+  const noteId = Number(await ask('Note ID: '));
+  const targetUserId = Number(await ask('Target user ID to revoke: '));
+  if (!Number.isInteger(noteId) || noteId <= 0 || !Number.isInteger(targetUserId) || targetUserId <= 0) {
+    console.log('Invalid input. Note ID and User ID must be positive numbers.');
+    return;
+  }
+  const result = await sharing.revokeAccess(noteId, user.id, targetUserId);
+  if (!result.success) {
+    if (String(result.error || '').toLowerCase().includes('denied')) {
+      console.log('Permission denied: only the note owner can revoke access.');
+      return;
+    }
+    console.log(`Could not revoke access: ${result.error}`);
+    return;
+  }
+  console.log(`Access revoked for user #${targetUserId} on note #${noteId}.`);
+}
+
 async function listSharedNotes() {
   const user = await requireUser();
   if (!user) return;
@@ -172,8 +220,10 @@ function showMenu() {
   console.log('4. Create note');
   console.log('5. View note (by ID)');
   console.log('6. Share note (by ID, username, permission)');
-  console.log('7. List shared notes');
-  console.log('8. Exit');
+  console.log('7. List who has access to a note');
+  console.log('8. Revoke access');
+  console.log('9. View notes shared with me');
+  console.log('10. Exit');
 }
 
 async function main() {
@@ -202,13 +252,19 @@ async function main() {
         await shareNote();
         break;
       case '7':
-        await listSharedNotes();
+        await listNoteAccess();
         break;
       case '8':
+        await revokeAccess();
+        break;
+      case '9':
+        await listSharedNotes();
+        break;
+      case '10':
         running = false;
         break;
       default:
-        console.log('Invalid option. Please choose from 1 to 8.');
+        console.log('Invalid option. Please choose from 1 to 10.');
     }
   }
 

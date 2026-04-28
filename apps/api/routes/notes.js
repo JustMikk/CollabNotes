@@ -2,6 +2,7 @@ const express = require('express');
 const notesModule = require('@collabnotes/shared-notes');
 
 const router = express.Router();
+const exportUtil = require('@collabnotes/shared-notes/export');
 
 // GET /api/notes - Get all notes (owned + shared)
 // Optional query param: ?tag=tagName
@@ -30,6 +31,39 @@ router.get('/:id', async (req, res) => {
     return res.status(404).json({ error: result.error });
   } catch (err) {
     console.error('[NOTES] GET /:id', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/notes/:id/export?format=json|markdown|text - download exported note
+router.get('/:id/export', async (req, res) => {
+  try {
+    const noteId = parseInt(req.params.id, 10);
+    const userId = req.user && req.user.id;
+    const fmt = (req.query.format || 'json').toLowerCase();
+
+    const result = await notesModule.getNoteById(noteId, userId);
+    if (!result.success) return res.status(404).json({ error: result.error });
+    const note = result.data;
+
+    let body, contentType;
+    if (fmt === 'markdown' || fmt === 'md') {
+      body = exportUtil.exportToMarkdown(note);
+      contentType = 'text/markdown';
+    } else if (fmt === 'text' || fmt === 'txt') {
+      body = exportUtil.exportToText(note);
+      contentType = 'text/plain';
+    } else {
+      body = exportUtil.exportToJSON(note);
+      contentType = 'application/json';
+    }
+
+    const filename = exportUtil.filenameFor(note, fmt === 'md' ? 'markdown' : (fmt === 'txt' ? 'text' : fmt));
+    res.setHeader('Content-Type', contentType + '; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(body);
+  } catch (err) {
+    console.error('[NOTES] GET /:id/export', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

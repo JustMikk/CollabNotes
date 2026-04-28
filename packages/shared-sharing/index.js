@@ -70,9 +70,52 @@ async function canWrite(noteId, userId) {
 	}
 }
 
+async function listSharesForNote(noteId, ownerId) {
+  try {
+    if (!noteId || !ownerId) return { success: false, error: 'noteId and ownerId are required' };
+    const db = await getDb();
+    const note = await db.get(`SELECT id FROM notes WHERE id = ? AND owner_id = ?`, [noteId, ownerId]);
+    if (!note) return { success: false, error: 'Note not found or access denied' };
+    const rows = await db.all(`SELECT * FROM note_shares WHERE note_id = ? ORDER BY created_at DESC`, [noteId]);
+    return { success: true, data: rows };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function updateSharePermission(shareId, ownerId, canWriteValue) {
+  try {
+    if (!shareId || !ownerId) return { success: false, error: 'shareId and ownerId are required' };
+    const db = await getDb();
+    const share = await db.get(`SELECT * FROM note_shares WHERE id = ? AND owner_id = ?`, [shareId, ownerId]);
+    if (!share) return { success: false, error: 'Share not found or access denied' };
+    await db.run(`UPDATE note_shares SET can_write = ? WHERE id = ?`, [canWriteValue ? 1 : 0, shareId]);
+    const updated = await db.get(`SELECT * FROM note_shares WHERE id = ?`, [shareId]);
+    return { success: true, data: updated };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+async function revokeShare(shareId, ownerId) {
+  try {
+    if (!shareId || !ownerId) return { success: false, error: 'shareId and ownerId are required' };
+    const db = await getDb();
+    const share = await db.get(`SELECT * FROM note_shares WHERE id = ? AND owner_id = ?`, [shareId, ownerId]);
+    if (!share) return { success: false, error: 'Share not found or access denied' };
+    await db.run(`DELETE FROM note_shares WHERE id = ?`, [shareId]);
+    return { success: true, data: { id: shareId } };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 module.exports = {
 	shareNote,
 	getSharedNotesForUser,
 	canRead,
 	canWrite,
+  listSharesForNote,
+  updateSharePermission,
+  revokeShare,
 };

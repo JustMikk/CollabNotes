@@ -164,6 +164,116 @@ async function getUserById(id) {
   }
 }
 
+/**
+ * Update email and/or password for a user.
+ * @param {number} userId
+ * @param {{ email?: string, password?: string }} updates
+ */
+async function updateProfile(userId, updates) {
+  try {
+    if (!userId || !updates || typeof updates !== 'object') {
+      return { success: false, error: 'userId and updates object are required' };
+    }
+    const db = await getDb();
+    const existing = await db.get(`SELECT id FROM users WHERE id = ?`, [userId]);
+    if (!existing) {
+      return { success: false, error: 'User not found' };
+    }
+    const fields = [];
+    const vals = [];
+    if (updates.email !== undefined) {
+      fields.push('email = ?');
+      vals.push(updates.email === null ? null : String(updates.email));
+    }
+    if (updates.password !== undefined) {
+      const hash = await bcrypt.hash(String(updates.password), BCRYPT_ROUNDS);
+      fields.push('password = ?');
+      vals.push(hash);
+    }
+    if (fields.length === 0) {
+      return { success: false, error: 'No updatable fields' };
+    }
+    vals.push(userId);
+    await db.run(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, vals);
+    const row = await db.get(`SELECT id, username, email, created_at FROM users WHERE id = ?`, [userId]);
+    return { success: true, data: row };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * Change password after verifying the current password.
+ */
+async function changePassword(userId, oldPassword, newPassword) {
+  try {
+    if (!userId || !oldPassword || !newPassword) {
+      return { success: false, error: 'userId, oldPassword and newPassword are required' };
+    }
+    const db = await getDb();
+    const row = await db.get(`SELECT * FROM users WHERE id = ?`, [userId]);
+    if (!row) {
+      return { success: false, error: 'User not found' };
+    }
+    const ok = await bcrypt.compare(String(oldPassword), row.password);
+    if (!ok) {
+      return { success: false, error: 'Invalid credentials' };
+    }
+    const hash = await bcrypt.hash(String(newPassword), BCRYPT_ROUNDS);
+    await db.run(`UPDATE users SET password = ? WHERE id = ?`, [hash, userId]);
+    return { success: true, data: { id: userId } };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+/**
+ * Delete user and dependent rows (sessions, shares, notes owned, versions, note_shares).
+ */
+async function deleteAccount(userId) {
+  try {
+    if (!userId) {
+      return { success: false, error: 'userId is required' };
+    }
+    const db = await getDb();
+    const row = await db.get(`SELECT id FROM users WHERE id = ?`, [userId]);
+    if (!row) {
+      return { success: false, error: 'User not found' };
+    }
+
+    await db.run('BEGIN IMMEDIATE');
+    try {
+      await db.run(`DELETE FROM sessions WHERE user_id = ?`, [userId]);
+      await db.run(
+        `DELETE FROM note_versions WHERE note_id IN (SELECT id FROM notes WHERE owner_id = ?)`,
+        [userId]
+      );
+      await db.run(`DELETE FROM note_versions WHERE updated_by = ?`, [userId]);
+      await db.run(
+        `DELETE FROM note_shares WHERE owner_id = ? OR shared_with_id = ? OR note_id IN (SELECT id FROM notes WHERE owner_id = ?)`,
+        [userId, userId, userId]
+      );
+      await db.run(
+        `DELETE FROM shares WHERE user_id = ? OR note_id IN (SELECT id FROM notes WHERE owner_id = ?)`,
+        [userId, userId]
+      );
+      await db.run(`DELETE FROM notes WHERE owner_id = ?`, [userId]);
+      await db.run(`DELETE FROM users WHERE id = ?`, [userId]);
+      await db.run('COMMIT');
+    } catch (e) {
+      try {
+        await db.run('ROLLBACK');
+      } catch (r) {
+        /* ignore */
+      }
+      throw e;
+    }
+    return { success: true, data: null };
+  } catch (err) {
+    return { success: false, error: err && err.message ? err.message : String(err) };
+  }
+}
+
 /** API alias — email omitted */
 async function registerUser(username, password) {
   return register(username, password, undefined);
@@ -179,6 +289,9 @@ module.exports = {
   verifyToken,
   logout,
   getUserById,
+  updateProfile,
+  changePassword,
+  deleteAccount,
   registerUser,
   loginUser,
   cleanupExpiredSessions,

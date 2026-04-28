@@ -17,6 +17,10 @@ const {
   verifyToken,
   logout,
   cleanupExpiredSessions,
+  updateProfile,
+  changePassword,
+  deleteAccount,
+  getUserById,
 } = require('./index.js');
 
 async function wipeDb() {
@@ -89,6 +93,24 @@ async function wipeDb() {
     // cleanupExpiredSessions should be safe
     const c = await cleanupExpiredSessions();
     assert.strictEqual(c.success, true, 'cleanup should succeed');
+
+    // Profile + delete account
+    const pr = await register('bob', 'bobpw', 'bob@ex.com');
+    assert.strictEqual(pr.success, true);
+    const bobId = pr.data.id;
+    const up = await updateProfile(bobId, { email: 'bob2@ex.com', password: 'newpw' });
+    assert.strictEqual(up.success, true);
+    assert.strictEqual(up.data.email, 'bob2@ex.com');
+    const badOld = await changePassword(bobId, 'wrong', 'x');
+    assert.strictEqual(badOld.success, false);
+    const cp = await changePassword(bobId, 'newpw', 'finalpw');
+    assert.strictEqual(cp.success, true);
+    const lb = await login('bob', 'finalpw');
+    assert.strictEqual(lb.success, true);
+    const delBob = await deleteAccount(bobId);
+    assert.strictEqual(delBob.success, true);
+    const ghost = await getUserById(bobId);
+    assert.strictEqual(ghost.success, false);
 
     await wipeDb();
     console.log('shared-auth tests: all passed');

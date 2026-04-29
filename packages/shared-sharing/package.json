@@ -1,5 +1,11 @@
 {
   "name": "@collabnotes/shared-sharing",
   "version": "1.0.0",
-  "main": "index.js"
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "dependencies": {
+    "@collabnotes/shared-database": "file:../shared-database"
+  }
 }

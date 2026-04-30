@@ -1,5 +1,6 @@
 /**
- * Shared Auth — register, login, sessions (Objects-as-components; refactor in Iteration 7).
+ * CollabNotes authentication module (singleton facade over SQLite + bcrypt).
+ * @module @collabnotes/shared-auth
  */
 
 const crypto = require('crypto');
@@ -23,7 +24,9 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-/** Remove expired sessions (called on login/verify; safe to call anytime). */
+/** Delete expired session rows (also invoked automatically before login and verifyToken).
+ * @returns {Promise<{ success: boolean, data?: { cleaned: boolean }, error?: string }>}
+ */
 async function cleanupExpiredSessions() {
   try {
     const db = await getDb();
@@ -36,10 +39,11 @@ async function cleanupExpiredSessions() {
 }
 
 /**
- * @param {string} username
- * @param {string} password
- * @param {string} [email]
- * @returns {Promise<{ success: boolean, data?: object, error?: string }>}
+ * Register a new user with bcrypt-hashed password.
+ * @param {string} username Unique username (case-insensitive duplicate check).
+ * @param {string} password Plain-text password.
+ * @param {string} [email] Optional email.
+ * @returns {Promise<{ success: boolean, data?: { id: number, username: string, email: string|null, created_at: string }, error?: string }>}
  */
 async function register(username, password, email) {
   try {
@@ -65,9 +69,10 @@ async function register(username, password, email) {
 }
 
 /**
+ * Authenticate user and issue a session token (7-day expiry).
  * @param {string} username
  * @param {string} password
- * @returns {Promise<{ success: boolean, data?: { token: string, user: object }, error?: string }>}
+ * @returns {Promise<{ success: boolean, data?: { token: string, user: { id: number, username: string, email: string|null } }, error?: string }>}
  */
 async function login(username, password) {
   try {
@@ -100,9 +105,10 @@ async function login(username, password) {
 }
 
 /**
- * Validate session token. Returns user object for middleware, or null.
- * @param {string} token
- * @returns {Promise<object|null>}
+ * Resolve a bearer token to the current user, or `null` if invalid/expired.
+ * Intended for Express middleware (boolean-style failure via null).
+ * @param {string|null|undefined} token Session token string.
+ * @returns {Promise<{ id: number, username: string, email: string|null }|null>}
  */
 async function verifyToken(token) {
   try {
@@ -128,6 +134,7 @@ async function verifyToken(token) {
 }
 
 /**
+ * Revoke a session by token.
  * @param {string} token
  * @returns {Promise<{ success: boolean, data?: null, error?: string }>}
  */
@@ -145,8 +152,9 @@ async function logout(token) {
 }
 
 /**
- * @param {number} id
- * @returns {Promise<{ success: boolean, data?: object, error?: string }>}
+ * Load public user fields by id (never includes password hash).
+ * @param {number} id User id.
+ * @returns {Promise<{ success: boolean, data?: { id: number, username: string, email: string|null, created_at: string }, error?: string }>}
  */
 async function getUserById(id) {
   try {
@@ -165,9 +173,10 @@ async function getUserById(id) {
 }
 
 /**
- * Update email and/or password for a user.
+ * Update email and/or password for a user (passwords are re-hashed).
  * @param {number} userId
- * @param {{ email?: string, password?: string }} updates
+ * @param {{ email?: string|null, password?: string }} updates
+ * @returns {Promise<{ success: boolean, data?: { id: number, username: string, email: string|null, created_at: string }, error?: string }>}
  */
 async function updateProfile(userId, updates) {
   try {
@@ -204,6 +213,10 @@ async function updateProfile(userId, updates) {
 
 /**
  * Change password after verifying the current password.
+ * @param {number} userId
+ * @param {string} oldPassword
+ * @param {string} newPassword
+ * @returns {Promise<{ success: boolean, data?: { id: number }, error?: string }>}
  */
 async function changePassword(userId, oldPassword, newPassword) {
   try {
@@ -228,7 +241,9 @@ async function changePassword(userId, oldPassword, newPassword) {
 }
 
 /**
- * Delete user and dependent rows (sessions, shares, notes owned, versions, note_shares).
+ * Delete the user and cascade-related rows (sessions, shares, owned notes, versions, note_shares).
+ * @param {number} userId
+ * @returns {Promise<{ success: boolean, data?: null, error?: string }>}
  */
 async function deleteAccount(userId) {
   try {
@@ -274,11 +289,22 @@ async function deleteAccount(userId) {
   }
 }
 
-/** API alias — email omitted */
+/**
+ * Same as {@link register} but omits email (REST `/register` compatibility).
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{ success: boolean, data?: object, error?: string }>}
+ */
 async function registerUser(username, password) {
   return register(username, password, undefined);
 }
 
+/**
+ * Same as {@link login} (REST `/login` compatibility).
+ * @param {string} username
+ * @param {string} password
+ * @returns {Promise<{ success: boolean, data?: { token: string, user: object }, error?: string }>}
+ */
 async function loginUser(username, password) {
   return login(username, password);
 }

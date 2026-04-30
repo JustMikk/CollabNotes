@@ -11,7 +11,9 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', '..', 'collabnotes.db');
+function getDbPath() {
+  return process.env.CNB_DB_PATH || path.join(__dirname, '..', '..', 'collabnotes.db');
+}
 
 class Database {
   constructor() {
@@ -23,6 +25,7 @@ class Database {
    */
   async init() {
     return new Promise((resolve, reject) => {
+      const DB_PATH = getDbPath();
       this.db = new sqlite3.Database(DB_PATH, (err) => {
         if (err) {
           reject(err);

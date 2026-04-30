@@ -4,7 +4,13 @@
  * Architectural Units model
  */
 
-const { getDb } = require('@collabnotes/shared-database');
+let getDb;
+try {
+  ({ getDb } = require('@collabnotes/shared-database'));
+} catch (e) {
+  // Fallback to local package path for development/testing without npm install
+  ({ getDb } = require('../shared-database'));
+}
 
 function normalizeTags(input) {
   if (!input) return [];

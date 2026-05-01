@@ -1,6 +1,5 @@
 const express = require('express');
 const sharing = require('@collabnotes/shared-sharing');
-const { addNotification } = require('../lib/notifications');
 
 const router = express.Router();
 
@@ -12,7 +11,6 @@ router.post('/:id/share', async (req, res, next) => {
     const { username, permission } = req.body || {};
     const result = await sharing.shareNote(noteId, ownerId, username, permission);
     if (result.success) {
-      addNotification(Number(result.data.userId), `A note was shared with you (note #${noteId})`);
       return res.status(201).json({ success: true, data: result.data });
     }
     return res.apiError(400, 'SHARE_001', result.error || 'Unable to share note');

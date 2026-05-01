@@ -11,7 +11,7 @@ const notesRouter = require('./routes/notes');
 const authRouter = require('./routes/auth');
 const sharingRouter = require('./routes/sharing');
 const searchModule = require('@collabnotes/shared-search');
-const notifications = require('./lib/notifications');
+const sharing = require('@collabnotes/shared-sharing');
 
 const app = express();
 const PORT = 3001;
@@ -98,14 +98,31 @@ app.get('/api/search', authMiddleware, async (req, res, next) => {
 
 app.get('/api/notifications', authMiddleware, (req, res) => {
   const userId = req.user.id;
-  res.json({ success: true, data: notifications.getNotifications(userId) });
+  sharing
+    .getNotifications(userId)
+    .then((result) => {
+      if (!result.success) return res.apiError(400, 'NOTIFY_001', result.error || 'Unable to load notifications');
+      return res.json({ success: true, data: result.data });
+    })
+    .catch((err) => {
+      console.error('[NOTIFY] GET /api/notifications', err);
+      res.apiError(500, 'NOTIFY_500', 'Unable to load notifications');
+    });
 });
 
-app.post('/api/notifications/:id/read', authMiddleware, (req, res) => {
+app.put('/api/notifications/:id/read', authMiddleware, (req, res) => {
   const userId = req.user.id;
   const id = Number(req.params.id);
-  notifications.markRead(userId, id);
-  res.json({ success: true, data: { id } });
+  sharing
+    .markAsRead(id, userId)
+    .then((result) => {
+      if (!result.success) return res.apiError(400, 'NOTIFY_002', result.error || 'Unable to mark as read');
+      return res.json({ success: true, data: result.data });
+    })
+    .catch((err) => {
+      console.error('[NOTIFY] PUT /api/notifications/:id/read', err);
+      res.apiError(500, 'NOTIFY_500', 'Unable to mark notification as read');
+    });
 });
 
 // GET /api/tags - return all unique tags for user

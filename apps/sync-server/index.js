@@ -24,7 +24,24 @@ createSyncServer({
   authenticate: async (req) => {
     const token = tokenFromReq(req);
     if (!token) return null;
-    return auth.verifyToken(token);
+    if (typeof auth.authenticateToken === 'function') {
+      const result = await auth.authenticateToken(token);
+      if (!result || !result.success || !result.data) return null;
+      return {
+        id: result.data.id,
+        username: result.data.username,
+        name: result.data.username,
+        email: result.data.email || null,
+      };
+    }
+    const user = await auth.verifyToken(token);
+    if (!user) return null;
+    return {
+      id: user.id,
+      username: user.username,
+      name: user.username,
+      email: user.email || null,
+    };
   },
 });
 

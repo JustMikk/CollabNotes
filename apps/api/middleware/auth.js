@@ -13,17 +13,26 @@ async function authMiddleware(req, res, next) {
     const token = parts.length === 2 && parts[0].toLowerCase() === 'bearer' ? parts[1] : auth || null;
 
     if (!token) {
-      return res.status(401).json({ error: 'Unauthorized - missing Authorization header' });
+      return res.apiError
+        ? res.apiError(401, 'AUTH_001', 'Unauthorized - missing Authorization header')
+        : res.status(401).json({ success: false, error: { code: 'AUTH_001', message: 'Unauthorized - missing Authorization header' } });
     }
 
     const user = await verifyToken(token);
-    if (!user) return res.status(401).json({ error: 'Unauthorized - invalid token' });
+    if (!user) {
+      return res.apiError
+        ? res.apiError(401, 'AUTH_002', 'Unauthorized - invalid token')
+        : res.status(401).json({ success: false, error: { code: 'AUTH_002', message: 'Unauthorized - invalid token' } });
+    }
 
     req.user = user;
     next();
   } catch (err) {
     console.error('[AUTH ERROR]', err);
-    res.status(500).json({ error: 'Authentication error' });
+    err.code = err.code || 'AUTH_500';
+    err.status = err.status || 500;
+    err.message = err.message || 'Authentication error';
+    next(err);
   }
 }
 

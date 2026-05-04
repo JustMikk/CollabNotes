@@ -5,6 +5,7 @@
   "scripts": {
     "dev:web": "cd apps/web && npm run dev",
     "dev:api": "cd apps/api && npm run dev",
+    "dev:sync": "cd apps/sync-server && npm run dev",
     "dev:cli": "node apps/cli/index.js",
     "build": "turbo build",
     "test": "turbo test"

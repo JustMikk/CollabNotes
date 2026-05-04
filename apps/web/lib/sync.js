@@ -1,50 +1,43 @@
 'use client';
 
-import { io } from 'socket.io-client';
+import { SyncClient } from '@collabnotes/shared-sync/client';
 import { getToken } from './auth';
 
 const SYNC_URL = process.env.NEXT_PUBLIC_SYNC_URL || 'ws://localhost:3002';
-let socket;
+let client;
 
 export function connectSync() {
-  if (socket) return socket;
-  socket = io(SYNC_URL, {
-    transports: ['websocket'],
-    auth: {
-      token: getToken(),
-    },
+  if (client) return client;
+  client = new SyncClient({
+    url: SYNC_URL,
+    token: getToken(),
   });
-  return socket;
+  return client;
 }
 
 export function joinNote(noteId) {
-  const client = connectSync();
-  client.emit('note:join', { noteId });
+  connectSync().join(noteId);
 }
 
 export function leaveNote(noteId) {
-  if (!socket) return;
-  socket.emit('note:leave', { noteId });
+  if (!client) return;
+  client.leave(noteId);
 }
 
 export function onPresence(callback) {
-  const client = connectSync();
-  client.on('presence:update', callback);
-  return () => client.off('presence:update', callback);
+  return connectSync().on('presence', callback);
 }
 
 export function onCursor(callback) {
-  const client = connectSync();
-  client.on('cursor:update', callback);
-  return () => client.off('cursor:update', callback);
+  return connectSync().on('cursor', callback);
 }
 
 export function sendCursor(noteId, position) {
-  if (!socket) return;
-  socket.emit('cursor:update', { noteId, position });
+  if (!client) return;
+  client.sendCursor(noteId, position);
 }
 
 export function notifyNoteSaved(noteId) {
-  if (!socket) return;
-  socket.emit('note:saved', { noteId });
+  if (!client) return;
+  client.sendEdit(noteId, 0, []);
 }

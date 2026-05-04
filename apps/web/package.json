@@ -14,10 +14,10 @@
     "react": "latest",
     "react-dom": "latest",
     "react-hot-toast": "latest",
-    "socket.io-client": "latest",
     "tailwindcss": "latest",
     "@collabnotes/shared-auth": "file:../../packages/shared-auth",
     "@collabnotes/shared-notes": "file:../../packages/shared-notes",
+    "@collabnotes/shared-sync": "file:../../packages/shared-sync",
     "@collabnotes/shared-sharing": "file:../../packages/shared-sharing",
     "@collabnotes/shared-search": "file:../../packages/shared-search"
   }

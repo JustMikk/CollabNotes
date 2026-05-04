@@ -75,6 +75,21 @@ class Database {
               if (err) console.warn('[DB] note_versions table creation warning', err);
             }
           );
+          // Note sharing table
+          this.db.run(
+            `CREATE TABLE IF NOT EXISTS note_shares (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              note_id INTEGER NOT NULL,
+              owner_id INTEGER NOT NULL,
+              shared_with_id INTEGER NOT NULL,
+              can_write INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(note_id, shared_with_id)
+            )`,
+            (err) => {
+              if (err) console.warn('[DB] note_shares table creation warning', err);
+            }
+          );
       });
       }).then(async () => {
         // Ensure tags column exists for older DBs: run PRAGMA table_info and ALTER if missing
@@ -106,6 +121,24 @@ class Database {
           }
         } catch (err) {
           console.warn('[DB] Warning while ensuring note_versions table:', err && err.message);
+        }
+        try {
+          const rows = await this.all(`PRAGMA table_info(note_shares)`);
+          const hasNoteShares = rows && rows.length > 0;
+          if (!hasNoteShares) {
+            await this.run(`CREATE TABLE IF NOT EXISTS note_shares (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              note_id INTEGER NOT NULL,
+              owner_id INTEGER NOT NULL,
+              shared_with_id INTEGER NOT NULL,
+              can_write INTEGER DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(note_id, shared_with_id)
+            )`);
+            console.log('[DB] Created note_shares table');
+          }
+        } catch (err) {
+          console.warn('[DB] Warning while ensuring note_shares table:', err && err.message);
         }
         return;
     });

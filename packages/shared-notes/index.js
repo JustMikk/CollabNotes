@@ -12,6 +12,17 @@ try {
   ({ getDb } = require('../shared-database'));
 }
 
+let sharedModule;
+try {
+  sharedModule = require('@collabnotes/shared-sharing');
+} catch (e) {
+  try {
+    sharedModule = require('../shared-sharing');
+  } catch (e2) {
+    sharedModule = null;
+  }
+}
+
 function normalizeTags(input) {
   if (!input) return [];
   if (Array.isArray(input)) return input.map((t) => String(t).trim()).filter(Boolean);
@@ -78,10 +89,17 @@ async function getNoteById(id, userId) {
     }
 
     const db = await getDb();
-    const note = await db.get(
+    let note = await db.get(
       `SELECT * FROM notes WHERE id = ? AND owner_id = ?`,
       [id, userId]
     );
+
+    if (!note && sharedModule && sharedModule.canRead) {
+      const readable = await sharedModule.canRead(id, userId);
+      if (readable) {
+        note = await db.get(`SELECT * FROM notes WHERE id = ?`, [id]);
+      }
+    }
 
     if (!note) {
       return { success: false, error: 'Note not found or access denied' };
@@ -140,12 +158,19 @@ async function updateNote(id, userId, updates) {
       return { success: false, error: 'id, userId, and updates are required' };
     }
 
-    // Verify ownership
+    // Verify write access (owner or shared with can_write)
     const db = await getDb();
-    const note = await db.get(
+    let note = await db.get(
       `SELECT * FROM notes WHERE id = ? AND owner_id = ?`,
       [id, userId]
     );
+
+    if (!note && sharedModule && sharedModule.canWrite) {
+      const writable = await sharedModule.canWrite(id, userId);
+      if (writable) {
+        note = await db.get(`SELECT * FROM notes WHERE id = ?`, [id]);
+      }
+    }
 
     if (!note) {
       return { success: false, error: 'Note not found or access denied' };
@@ -184,9 +209,9 @@ async function updateNote(id, userId, updates) {
 
     fields.push('updated_at = CURRENT_TIMESTAMP');
     // Append WHERE params after SET values
-    values.push(id, userId);
+    values.push(id);
 
-    const query = `UPDATE notes SET ${fields.join(', ')} WHERE id = ? AND owner_id = ?`;
+    const query = `UPDATE notes SET ${fields.join(', ')} WHERE id = ?`;
     await db.run(query, values);
 
     const updatedNote = await db.get(`SELECT * FROM notes WHERE id = ?`, [id]);
@@ -294,11 +319,13 @@ async function getAllNotes(userId) {
     }
 
     const db = await getDb();
-    // For now, return only owned notes
-    // TODO: Join with sharing table when @collabnotes/shared-sharing is implemented
     const notes = await db.all(
-      `SELECT * FROM notes WHERE owner_id = ? ORDER BY updated_at DESC`,
-      [userId]
+      `SELECT DISTINCT n.*
+       FROM notes n
+       LEFT JOIN note_shares ns ON ns.note_id = n.id
+       WHERE n.owner_id = ? OR ns.shared_with_id = ?
+       ORDER BY n.updated_at DESC`,
+      [userId, userId]
     );
     const parsed = notes.map((n) => {
       if (n && n.tags) {
@@ -323,7 +350,15 @@ async function getNotesByTag(userId, tag) {
     const db = await getDb();
     // Match JSON array content containing the tag string
     const pattern = `%"${tag}"%`;
-    const notes = await db.all(`SELECT * FROM notes WHERE owner_id = ? AND tags LIKE ? ORDER BY updated_at DESC`, [userId, pattern]);
+    const notes = await db.all(
+      `SELECT DISTINCT n.*
+       FROM notes n
+       LEFT JOIN note_shares ns ON ns.note_id = n.id
+       WHERE (n.owner_id = ? OR ns.shared_with_id = ?)
+         AND n.tags LIKE ?
+       ORDER BY n.updated_at DESC`,
+      [userId, userId, pattern]
+    );
     const parsed = notes.map((n) => {
       if (n && n.tags) {
         try { n.tags = JSON.parse(n.tags); } catch (e) { n.tags = []; }

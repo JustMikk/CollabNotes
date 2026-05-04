@@ -8,6 +8,8 @@ const cors = require('cors');
 const { getDb } = require('@collabnotes/shared-database');
 const authMiddleware = require('./middleware/auth');
 const notesRouter = require('./routes/notes');
+const authRouter = require('./routes/auth');
+const sharingRouter = require('./routes/sharing');
 
 const app = express();
 const PORT = 3001;
@@ -71,8 +73,11 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.use('/api/auth', authRouter);
+
 // Mount notes router with auth middleware
 app.use('/api/notes', authMiddleware, notesRouter);
+app.use('/api/shares', authMiddleware, sharingRouter);
 
 // GET /api/tags - return all unique tags for user
 app.get('/api/tags', authMiddleware, async (req, res, next) => {
@@ -107,14 +112,22 @@ async function start() {
     await getDb();
     console.log('[API] Database initialized');
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`[API] Server running on http://localhost:${PORT}`);
       console.log(`[API] Health check: GET http://localhost:${PORT}/health`);
     });
+    return server;
   } catch (err) {
     console.error('[API] Startup error', err);
     process.exit(1);
   }
 }
 
-start();
+if (require.main === module) {
+  start();
+}
+
+module.exports = {
+  app,
+  start,
+};

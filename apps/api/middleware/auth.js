@@ -3,7 +3,7 @@
  * Extracts token from Authorization header and verifies via @collabnotes/shared-auth
  */
 
-const { verifyToken } = require('@collabnotes/shared-auth');
+const { authenticateToken } = require('@collabnotes/shared-auth');
 
 async function authMiddleware(req, res, next) {
   try {
@@ -14,18 +14,24 @@ async function authMiddleware(req, res, next) {
 
     if (!token) {
       return res.apiError
-        ? res.apiError(401, 'AUTH_001', 'Unauthorized - missing Authorization header')
-        : res.status(401).json({ success: false, error: { code: 'AUTH_001', message: 'Unauthorized - missing Authorization header' } });
+        ? res.apiError(401, 'AUTH_004', 'Unauthorized - missing Authorization header')
+        : res.status(401).json({
+            success: false,
+            error: { code: 'AUTH_004', message: 'Unauthorized - missing Authorization header' },
+          });
     }
 
-    const user = await verifyToken(token);
-    if (!user) {
+    const result = await authenticateToken(token);
+    if (!result.success) {
+      const code = result.error && result.error.code ? result.error.code : 'AUTH_004';
+      const message =
+        result.error && result.error.message ? result.error.message : 'Unauthorized - invalid token';
       return res.apiError
-        ? res.apiError(401, 'AUTH_002', 'Unauthorized - invalid token')
-        : res.status(401).json({ success: false, error: { code: 'AUTH_002', message: 'Unauthorized - invalid token' } });
+        ? res.apiError(401, code, message)
+        : res.status(401).json({ success: false, error: { code, message } });
     }
 
-    req.user = user;
+    req.user = result.data;
     next();
   } catch (err) {
     console.error('[AUTH ERROR]', err);

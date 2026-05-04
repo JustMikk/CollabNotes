@@ -52,6 +52,7 @@ async function wipeDb() {
     // Duplicate username
     const r2 = await register('Alice', 'x', null);
     assert.strictEqual(r2.success, false, 'duplicate register should fail');
+    assert.strictEqual(r2.error && r2.error.code, 'AUTH_005');
 
     // Login success
     const l1 = await login('alice', 'secret1');
@@ -62,6 +63,7 @@ async function wipeDb() {
     // Login wrong password
     const l2 = await login('alice', 'wrong');
     assert.strictEqual(l2.success, false, 'wrong password should fail');
+    assert.strictEqual(l2.error && l2.error.code, 'AUTH_002');
 
     // Verify valid token
     const u1 = await verifyToken(token);
@@ -103,6 +105,7 @@ async function wipeDb() {
     assert.strictEqual(up.data.email, 'bob2@ex.com');
     const badOld = await changePassword(bobId, 'wrong', 'x');
     assert.strictEqual(badOld.success, false);
+    assert.strictEqual(badOld.error && badOld.error.code, 'AUTH_002');
     const cp = await changePassword(bobId, 'newpw', 'finalpw');
     assert.strictEqual(cp.success, true);
     const lb = await login('bob', 'finalpw');
@@ -111,6 +114,7 @@ async function wipeDb() {
     assert.strictEqual(delBob.success, true);
     const ghost = await getUserById(bobId);
     assert.strictEqual(ghost.success, false);
+    assert.strictEqual(ghost.error && ghost.error.code, 'AUTH_001');
 
     await wipeDb();
     console.log('shared-auth tests: all passed');

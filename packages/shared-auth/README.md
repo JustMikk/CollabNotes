@@ -27,7 +27,8 @@ Failures return `{ success: false, error: ... }`. After Iteration 8, `error` is 
 |--------|-------------|
 | `register(username, password, email?)` | Create user; stores bcrypt hash. |
 | `login(username, password)` | Verify password; creates session row; returns `{ token, user }`. |
-| `verifyToken(token)` | Resolve session → user or `null`. Runs expired-session cleanup first. |
+| `authenticateToken(token)` | Structured `{ success, data }` / `{ success, error: { code, message } }` for APIs (distinguishes AUTH_003 vs AUTH_004). |
+| `verifyToken(token)` | Same resolution as `authenticateToken` but returns **user or `null`** (middleware-friendly). |
 | `logout(token)` | Delete session row for token. |
 | `getUserById(id)` | Public user fields only (no password). |
 | `updateProfile(userId, updates)` | `updates`: `{ email?, password? }`; passwords are re-hashed. |
@@ -57,13 +58,18 @@ Use `registerUser` / `loginUser` or `register` / `login`. Responses:
 
 **Protected routes**
 
-Read `Authorization: Bearer <token>` and pass the token to `verifyToken`. Attach the returned user to `req.user`:
+Prefer `authenticateToken` so HTTP handlers can return precise `AUTH_*` codes:
 
 ```javascript
-const user = await verifyToken(token);
-if (!user) return res.status(401).json({ success: false, error: { code: 'AUTH_004', message: '...' } });
-req.user = user;
+const { authenticateToken } = require('@collabnotes/shared-auth');
+const result = await authenticateToken(token);
+if (!result.success) {
+  return res.status(401).json({ success: false, error: result.error });
+}
+req.user = result.data;
 ```
+
+Legacy `verifyToken` still returns `user | null`.
 
 ## Tests
 
